@@ -45,7 +45,7 @@ These are explicitly deferred. See [SRS v2.0](./docs/HelsB_Credit_SRS_v2.0.docx)
 | **Backend** | Python + Flask |
 | **Database** | MariaDB |
 | **Auth** | Flask-JWT-Extended |
-| **Notifications** | In-app + Africa's Talking SMS (Zambia) |
+| **Notifications** | In-app + Zamtel SMS (Zambia) |
 
 ---
 
@@ -142,9 +142,11 @@ DB_PASSWORD=your-db-password
 JWT_SECRET_KEY=your-jwt-secret-here
 JWT_ACCESS_TOKEN_EXPIRES=86400      # 24 hours in seconds
 
-# SMS — optional, in-app notifications work without this
-AFRICAS_TALKING_API_KEY=your-key
-AFRICAS_TALKING_USERNAME=your-username
+# Login OTP SMS
+LOGIN_OTP_EXPIRES_SECONDS=300
+ZAMTEL_API_KEY=your-zamtel-api-key
+ZAMTEL_SENDER_ID=your-zamtel-sender-id
+ZAMTEL_BASE_URL=https://bulksms.zamtel.co.zm/api/v2.1/action/send/
 ```
 
 ---
@@ -161,7 +163,7 @@ helsb-credit/
 │   ├── .env.example
 │   │
 │   ├── routes/
-│   │   ├── auth.py                 # POST /auth/register, /auth/login
+│   │   ├── auth.py                 # POST /api/register, /api/login
 │   │   ├── students.py             # GET /students/<number>/check  ← core feature
 │   │   ├── loans.py                # POST /loans, PATCH /loans/<id>/repaid
 │   │   ├── bc_register.py          # BC register management (rep only)
@@ -213,9 +215,23 @@ helsb-credit/
 
 ## Core API endpoints
 
+Full request and response examples are available in [API Documentation](./docs/api.md).
+
 ```
-POST   /auth/register                      Create user account
-POST   /auth/login                         Authenticate → JWT
+POST   /api/register                       Create user account
+POST   /api/login                          Send OTP to phone number
+POST   /api/login/otp                      Validate OTP → JWT + user
+GET    /api/admin/users                    Admin list users
+POST   /api/admin/users                    Admin create user
+GET    /api/admin/users/<id>               Admin get user
+PATCH  /api/admin/users/<id>               Admin update user
+PATCH  /api/admin/users/<id>/status        Admin activate/deactivate user
+PATCH  /api/admin/users/<id>/reset-password Admin reset user password
+GET    /api/admin/universities             Public list universities
+POST   /api/admin/universities             Admin create university
+GET    /api/admin/universities/<id>        Admin get university
+PATCH  /api/admin/universities/<id>        Admin update university
+DELETE /api/admin/universities/<id>        Admin delete university
 
 GET    /students/<student_number>/check    Pre-loan check (BC status + loan count)
 GET    /students/<id>/profile              Student profile
@@ -340,7 +356,7 @@ The system being digitised already exists — students have been running this in
 
 ## Roadmap (post-hackathon)
 
-- [ ] SMS reminders via Africa's Talking (2 days before due date)
+- [ ] SMS reminders via Zamtel (2 days before due date)
 - [ ] Dispute resolution workflow
 - [ ] CSV export for rep backup
 - [ ] Multi-campus rollout
