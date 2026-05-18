@@ -64,6 +64,23 @@ CREATE TABLE IF NOT EXISTS `users` (
   KEY `idx_users_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `login_otps` (
+  `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` int(10) UNSIGNED NOT NULL,
+  `phone_number` varchar(20) NOT NULL,
+  `otp_code` varchar(6) NOT NULL,
+  `expires_at` datetime NOT NULL,
+  `consumed_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_login_otps_user_id` (`user_id`),
+  KEY `idx_login_otps_phone_number` (`phone_number`),
+  KEY `idx_login_otps_lookup` (`phone_number`, `otp_code`, `consumed_at`),
+  CONSTRAINT `fk_login_otps_user_id`
+    FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `loans` (
   `id` char(36) NOT NULL,
   `reference_code` varchar(30) NOT NULL,

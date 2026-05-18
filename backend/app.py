@@ -1,12 +1,16 @@
 from functools import wraps
 from datetime import datetime, timedelta
+import json
+import os
+import secrets
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 import jwt
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from werkzeug.security import (
     generate_password_hash,
-    check_password_hash
 )
 
 from db import get_connection
@@ -25,7 +29,7 @@ def generate_token(user):
 
     payload = {
         "user_id": user["id"],
-        "email": user["email"],
+        "phone_number": user["phone_number"],
         "role": user["role"],
         "exp": datetime.utcnow() + timedelta(hours=24)
     }
@@ -37,6 +41,60 @@ def generate_token(user):
     )
 
     return token
+
+
+def generate_otp():
+    return f"{secrets.randbelow(1000000):06d}"
+
+
+def get_otp_expires_at():
+    ttl_seconds = int(os.getenv("LOGIN_OTP_EXPIRES_SECONDS", "300"))
+    return datetime.utcnow() + timedelta(seconds=ttl_seconds)
+
+
+def build_user_response(user):
+    return {
+        "id": user["id"],
+        "full_name": user["full_name"],
+        "email": user["email"],
+        "phone_number": user["phone_number"],
+        "role": user["role"],
+    }
+
+
+def send_otp_sms(phone_number, otp):
+    api_key = os.getenv("ZAMTEL_API_KEY")
+    sender_id = os.getenv("ZAMTEL_SENDER_ID")
+    base_url = os.getenv(
+        "ZAMTEL_BASE_URL",
+        "https://bulksms.zamtel.co.zm/api/v2.1/action/send/"
+    )
+
+    if not api_key or not sender_id:
+        raise RuntimeError("Zamtel SMS credentials are not configured")
+
+    message = f"Your HelsB Credit login OTP is {otp}. It expires in 5 minutes."
+    endpoint = (
+        f"{base_url.rstrip('/')}/"
+        f"api_key/{quote(api_key, safe='')}/"
+        f"contacts/{quote(phone_number, safe='')}/"
+        f"senderId/{quote(sender_id, safe='')}/"
+        f"message/{quote(message, safe='')}"
+    )
+
+    request_obj = Request(endpoint, method="POST")
+    with urlopen(request_obj, timeout=10) as response:
+        body = response.read().decode("utf-8")
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        payload = {"success": False, "responseText": body}
+
+    if payload.get("success") is False:
+        raise RuntimeError(payload.get("responseText", "Zamtel SMS send failed"))
+
+    return payload
 
 
 def token_required(f):
@@ -103,10 +161,11 @@ def home():
 @app.route("/api/register", methods=["POST"])
 def register():
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
 
     full_name = data.get("full_name")
     email = data.get("email")
+    phone_number = data.get("phone_number")
     password = data.get("password")
 
     if not full_name or not email or not password:
@@ -136,6 +195,19 @@ def register():
                     "message": "Email already exists"
                 }), 409
 
+            if phone_number:
+                cursor.execute(
+                    "SELECT id FROM users WHERE phone_number = %s",
+                    (phone_number,)
+                )
+
+                if cursor.fetchone():
+
+                    return jsonify({
+                        "success": False,
+                        "message": "Phone number already exists"
+                    }), 409
+
             hashed_password = generate_password_hash(password)
 
             cursor.execute(
@@ -143,17 +215,19 @@ def register():
                 INSERT INTO users (
                     full_name,
                     email,
+                    phone_number,
                     password_hash,
                     role,
                     is_active,
                     is_verified,
                     failed_attempts
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     full_name,
                     email,
+                    phone_number,
                     hashed_password,
                     "borrower",
                     1,
@@ -178,16 +252,15 @@ def register():
 @app.route("/api/login", methods=["POST"])
 def login():
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
 
-    email = data.get("email")
-    password = data.get("password")
+    phone_number = data.get("phone_number")
 
-    if not email or not password:
+    if not phone_number:
 
         return jsonify({
             "success": False,
-            "message": "Email and password required"
+            "message": "Phone number required"
         }), 400
 
     connection = get_connection()
@@ -197,49 +270,149 @@ def login():
         with connection.cursor() as cursor:
 
             cursor.execute(
-                "SELECT * FROM users WHERE email = %s",
-                (email,)
+                "SELECT * FROM users WHERE phone_number = %s",
+                (phone_number,)
             )
 
             user = cursor.fetchone()
 
-        if not user:
+            if not user:
 
+                return jsonify({
+                    "success": False,
+                    "message": "Phone number not registered"
+                }), 404
+
+            if not user["is_active"]:
+
+                return jsonify({
+                    "success": False,
+                    "message": "Account disabled"
+                }), 403
+
+            otp = generate_otp()
+            expires_at = get_otp_expires_at()
+
+            cursor.execute(
+                """
+                INSERT INTO login_otps (
+                    user_id,
+                    phone_number,
+                    otp_code,
+                    expires_at
+                )
+                VALUES (%s, %s, %s, %s)
+                """,
+                (user["id"], phone_number, otp, expires_at)
+            )
+
+        try:
+            send_otp_sms(phone_number, otp)
+        except RuntimeError as exc:
+            connection.rollback()
             return jsonify({
                 "success": False,
-                "message": "Invalid credentials"
-            }), 401
+                "message": str(exc)
+            }), 502
 
-        if not check_password_hash(
-            user["password_hash"],
-            password
-        ):
+        connection.commit()
 
-            return jsonify({
-                "success": False,
-                "message": "Invalid credentials"
-            }), 401
+        return jsonify({
+            "success": True,
+            "message": "OTP sent successfully"
+        }), 200
 
-        if not user["is_active"]:
+    finally:
+        connection.close()
 
-            return jsonify({
-                "success": False,
-                "message": "Account disabled"
-            }), 403
 
+@app.route("/api/login/otp", methods=["POST"])
+def login_otp():
+
+    data = request.get_json(silent=True) or {}
+
+    phone_number = data.get("phone_number")
+    otp = data.get("otp")
+
+    if not phone_number or not otp:
+
+        return jsonify({
+            "success": False,
+            "message": "Phone number and OTP required"
+        }), 400
+
+    connection = get_connection()
+
+    try:
+
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT o.*, u.full_name, u.email, u.role, u.is_active
+                FROM login_otps o
+                JOIN users u ON u.id = o.user_id
+                WHERE o.phone_number = %s
+                  AND o.otp_code = %s
+                  AND o.consumed_at IS NULL
+                ORDER BY o.created_at DESC
+                LIMIT 1
+                """,
+                (phone_number, otp)
+            )
+
+            otp_record = cursor.fetchone()
+
+            if not otp_record:
+                return jsonify({
+                    "success": False,
+                    "message": "OTP validation failed"
+                }), 401
+
+            if otp_record["expires_at"] < datetime.utcnow():
+                return jsonify({
+                    "success": False,
+                    "message": "OTP validation failed"
+                }), 401
+
+            if not otp_record["is_active"]:
+
+                return jsonify({
+                    "success": False,
+                    "message": "Account disabled"
+                }), 403
+
+            cursor.execute(
+                "UPDATE login_otps SET consumed_at = UTC_TIMESTAMP() WHERE id = %s",
+                (otp_record["id"],)
+            )
+
+            cursor.execute(
+                """
+                UPDATE users
+                SET last_login_at = UTC_TIMESTAMP(), is_verified = 1
+                WHERE id = %s
+                """,
+                (otp_record["user_id"],)
+            )
+
+        connection.commit()
+
+        user = {
+            "id": otp_record["user_id"],
+            "full_name": otp_record["full_name"],
+            "email": otp_record["email"],
+            "phone_number": otp_record["phone_number"],
+            "role": otp_record["role"],
+        }
         token = generate_token(user)
 
         return jsonify({
             "success": True,
             "message": "Login successful",
             "token": token,
-            "user": {
-                "id": user["id"],
-                "full_name": user["full_name"],
-                "email": user["email"],
-                "role": user["role"]
-            }
-        })
+            "user": build_user_response(user)
+        }), 200
 
     finally:
         connection.close()
