@@ -215,6 +215,8 @@ helsb-credit/
 
 ## Core API endpoints
 
+Full request and response examples are available in [API Documentation](./docs/api.md).
+
 ```
 POST   /api/register                       Create user account
 POST   /api/login                          Send OTP to phone number

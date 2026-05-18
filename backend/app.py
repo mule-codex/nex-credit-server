@@ -1,5 +1,5 @@
 from functools import wraps
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import json
 import os
 import secrets
@@ -31,7 +31,7 @@ def generate_token(user):
         "user_id": user["id"],
         "phone_number": user["phone_number"],
         "role": user["role"],
-        "exp": datetime.utcnow() + timedelta(hours=24)
+        "exp": datetime.now(UTC) + timedelta(hours=24)
     }
 
     token = jwt.encode(
@@ -47,9 +47,13 @@ def generate_otp():
     return f"{secrets.randbelow(1000000):06d}"
 
 
+def utc_now():
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 def get_otp_expires_at():
     ttl_seconds = int(os.getenv("LOGIN_OTP_EXPIRES_SECONDS", "300"))
-    return datetime.utcnow() + timedelta(seconds=ttl_seconds)
+    return utc_now() + timedelta(seconds=ttl_seconds)
 
 
 def build_user_response(user):
@@ -369,7 +373,7 @@ def login_otp():
                     "message": "OTP validation failed"
                 }), 401
 
-            if otp_record["expires_at"] < datetime.utcnow():
+            if otp_record["expires_at"] < utc_now():
                 return jsonify({
                     "success": False,
                     "message": "OTP validation failed"

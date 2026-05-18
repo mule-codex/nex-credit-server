@@ -1,4 +1,5 @@
 import json
+from urllib.parse import unquote
 from uuid import uuid4
 
 import pytest
@@ -15,7 +16,7 @@ def client():
         yield c
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def sent_otps(monkeypatch):
     sent = []
 
@@ -193,6 +194,40 @@ class TestAuth:
 
         assert resp.status_code == 401
         assert data["message"] == "OTP validation failed"
+
+    def test_send_otp_sms_uses_zamtel_api(self, monkeypatch):
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"success": true, "responseText": "queued"}'
+
+        def fake_urlopen(request_obj, timeout):
+            captured["url"] = request_obj.full_url
+            captured["method"] = request_obj.get_method()
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        monkeypatch.setenv("ZAMTEL_API_KEY", "test-key")
+        monkeypatch.setenv("ZAMTEL_SENDER_ID", "HelsBCredit")
+        monkeypatch.setenv("ZAMTEL_BASE_URL", "https://bulksms.zamtel.co.zm/api/v2.1/action/send/")
+        monkeypatch.setattr(app_module, "urlopen", fake_urlopen)
+
+        response = app_module.send_otp_sms("0970000000", "123456")
+
+        assert response["success"] is True
+        assert captured["method"] == "POST"
+        assert captured["timeout"] == 10
+        assert "/api_key/test-key/" in captured["url"]
+        assert "/contacts/0970000000/" in captured["url"]
+        assert "/senderId/HelsBCredit/" in captured["url"]
+        assert "Your HelsB Credit login OTP is 123456" in unquote(captured["url"])
 
     def test_protected_no_token(self, client):
         resp = client.get("/api/protected")
