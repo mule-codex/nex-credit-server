@@ -54,6 +54,50 @@ def auth_token(client, sent_otps):
     return data["token"]
 
 
+def _create_user_direct(role="borrower"):
+    unique = uuid4().hex
+    connection = app_module.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO users (
+                    full_name, email, phone_number, role, password_hash,
+                    is_active, is_verified, failed_attempts
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    f"Direct {unique}",
+                    f"direct_{unique}@example.com",
+                    f"2609{unique[:8]}",
+                    role,
+                    app_module.generate_password_hash("password123"),
+                    1,
+                    1,
+                    0,
+                )
+            )
+            user_id = cursor.lastrowid
+        connection.commit()
+    finally:
+        connection.close()
+
+    return {
+        "id": user_id,
+        "full_name": f"Direct {unique}",
+        "email": f"direct_{unique}@example.com",
+        "phone_number": f"2609{unique[:8]}",
+        "role": role,
+    }
+
+
+@pytest.fixture
+def admin_token():
+    admin = _create_user_direct(role="admin")
+    return app_module.generate_token(admin)
+
+
 def _headers(token):
     return {
         "Authorization": f"Bearer {token}",
@@ -340,3 +384,131 @@ class TestUsersCRUD:
             headers=_headers(auth_token),
         )
         assert resp2.status_code == 404
+
+
+class TestAdminUsers:
+
+    def test_admin_routes_require_admin_role(self, client, auth_token):
+        resp = client.get("/api/admin/users", headers=_headers(auth_token))
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 403
+        assert data["message"] == "Admin access required"
+
+    def test_admin_create_and_get_user(self, client, admin_token):
+        unique = uuid4().hex
+        payload = {
+            "full_name": f"Managed {unique}",
+            "email": f"managed_{unique}@example.com",
+            "phone_number": f"26097{unique[:7]}",
+            "password": "password123",
+            "role": "lender",
+            "is_verified": 1,
+        }
+
+        create_resp = client.post(
+            "/api/admin/users",
+            headers=_headers(admin_token),
+            json=payload,
+        )
+        create_data = json.loads(create_resp.data)
+
+        assert create_resp.status_code == 201
+        assert create_data["success"] is True
+
+        get_resp = client.get(
+            f"/api/admin/users/{create_data['user_id']}",
+            headers=_headers(admin_token),
+        )
+        get_data = json.loads(get_resp.data)
+
+        assert get_resp.status_code == 200
+        assert get_data["data"]["email"] == payload["email"]
+        assert get_data["data"]["role"] == "lender"
+        assert get_data["data"]["is_verified"] is True
+
+    def test_admin_list_users_with_filters(self, client, admin_token):
+        managed = _create_user_direct(role="agent")
+
+        resp = client.get(
+            f"/api/admin/users?search={managed['email']}&role=agent&is_active=1",
+            headers=_headers(admin_token),
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert data["pagination"]["total"] >= 1
+        assert any(user["id"] == managed["id"] for user in data["data"])
+
+    def test_admin_update_user(self, client, admin_token):
+        managed = _create_user_direct(role="borrower")
+
+        resp = client.patch(
+            f"/api/admin/users/{managed['id']}",
+            headers=_headers(admin_token),
+            json={"university": "UNZA", "role": "rep"},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["message"] == "User updated successfully"
+
+        get_resp = client.get(
+            f"/api/admin/users/{managed['id']}",
+            headers=_headers(admin_token),
+        )
+        get_data = json.loads(get_resp.data)
+
+        assert get_data["data"]["university"] == "UNZA"
+        assert get_data["data"]["role"] == "rep"
+
+    def test_admin_update_user_status(self, client, admin_token):
+        managed = _create_user_direct(role="borrower")
+
+        resp = client.patch(
+            f"/api/admin/users/{managed['id']}/status",
+            headers=_headers(admin_token),
+            json={"is_active": 0},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["message"] == "User status updated successfully"
+
+        get_resp = client.get(
+            f"/api/admin/users/{managed['id']}",
+            headers=_headers(admin_token),
+        )
+        get_data = json.loads(get_resp.data)
+
+        assert get_data["data"]["is_active"] is False
+
+    def test_admin_reset_user_password(self, client, admin_token):
+        managed = _create_user_direct(role="borrower")
+
+        resp = client.patch(
+            f"/api/admin/users/{managed['id']}/reset-password",
+            headers=_headers(admin_token),
+            json={"password": "newpassword123"},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["message"] == "Password reset successfully"
+
+    def test_admin_rejects_invalid_role(self, client, admin_token):
+        resp = client.post(
+            "/api/admin/users",
+            headers=_headers(admin_token),
+            json={
+                "full_name": "Invalid Role",
+                "email": f"invalid_{uuid4().hex}@example.com",
+                "password": "password123",
+                "role": "user",
+            },
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 400
+        assert "Invalid role" in data["message"]

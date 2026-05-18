@@ -127,6 +127,101 @@ Protected examples:
 | `GET` | `/api/me` | Returns the decoded authenticated user token payload |
 | `GET` | `/api/protected` | Confirms protected route access |
 
+## Admin user management
+
+Admin routes require a bearer token whose user has `role: "admin"`.
+
+### List users
+
+`GET /api/admin/users`
+
+Query parameters:
+
+| Name | Description |
+|---|---|
+| `search` | Optional search across `full_name`, `email`, `student_number`, and `phone_number` |
+| `role` | Optional role filter: `borrower`, `lender`, `rep`, `admin`, or `agent` |
+| `is_active` | Optional status filter: `0` or `1` |
+| `page` | Optional page number, defaults to `1` |
+| `limit` | Optional page size from `1` to `100`, defaults to `20` |
+
+### Get a user
+
+`GET /api/admin/users/{user_id}`
+
+Returns the full serialized user record, including status, verification, failed attempts, and timestamps.
+
+### Create a user
+
+`POST /api/admin/users`
+
+Request:
+
+```json
+{
+  "full_name": "Lender User",
+  "email": "lender@example.com",
+  "phone_number": "0970000001",
+  "password": "password123",
+  "role": "lender",
+  "is_active": 1,
+  "is_verified": 0
+}
+```
+
+Success response:
+
+```json
+{
+  "success": true,
+  "message": "User created successfully",
+  "user_id": 2
+}
+```
+
+### Update a user
+
+`PATCH /api/admin/users/{user_id}`
+
+Allowed fields: `student_number`, `full_name`, `university`, `email`, `phone_number`, `role`, `is_active`, `is_verified`.
+
+### Update user status
+
+`PATCH /api/admin/users/{user_id}/status`
+
+Request:
+
+```json
+{
+  "is_active": 0
+}
+```
+
+### Reset user password
+
+`PATCH /api/admin/users/{user_id}/reset-password`
+
+Request:
+
+```json
+{
+  "password": "newpassword123"
+}
+```
+
+Common admin errors:
+
+| Status | Message |
+|---|---|
+| `400` | `Invalid role. Must be one of: borrower, lender, rep, admin, agent` |
+| `400` | `Password must be at least 8 characters` |
+| `401` | `Token missing` |
+| `403` | `Admin access required` |
+| `404` | `User not found` |
+| `409` | `Email already exists` |
+| `409` | `Phone number already exists` |
+| `409` | `Student number already exists` |
+
 ## Zamtel SMS configuration
 
 Set these variables in `backend/.env`:

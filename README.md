@@ -221,6 +221,12 @@ Full request and response examples are available in [API Documentation](./docs/a
 POST   /api/register                       Create user account
 POST   /api/login                          Send OTP to phone number
 POST   /api/login/otp                      Validate OTP → JWT + user
+GET    /api/admin/users                    Admin list users
+POST   /api/admin/users                    Admin create user
+GET    /api/admin/users/<id>               Admin get user
+PATCH  /api/admin/users/<id>               Admin update user
+PATCH  /api/admin/users/<id>/status        Admin activate/deactivate user
+PATCH  /api/admin/users/<id>/reset-password Admin reset user password
 
 GET    /students/<student_number>/check    Pre-loan check (BC status + loan count)
 GET    /students/<id>/profile              Student profile

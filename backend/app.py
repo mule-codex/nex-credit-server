@@ -25,6 +25,27 @@ app.config["SECRET_KEY"] = "super-secret-key"
 CORS(app)
 
 
+ALLOWED_ROLES = ("borrower", "lender", "rep", "admin", "agent")
+
+
+def serialize_user(user):
+    return {
+        "id": user["id"],
+        "student_number": user.get("student_number"),
+        "full_name": user["full_name"],
+        "university": user.get("university"),
+        "email": user.get("email"),
+        "phone_number": user.get("phone_number"),
+        "role": user["role"],
+        "is_active": bool(user["is_active"]),
+        "is_verified": bool(user["is_verified"]),
+        "failed_attempts": user.get("failed_attempts", 0),
+        "last_login_at": user["last_login_at"].isoformat() if user.get("last_login_at") else None,
+        "created_at": user["created_at"].isoformat() if user.get("created_at") else None,
+        "updated_at": user["updated_at"].isoformat() if user.get("updated_at") else None,
+    }
+
+
 def generate_token(user):
 
     payload = {
@@ -158,6 +179,22 @@ def token_required(f):
                 "success": False,
                 "message": "Invalid token"
             }), 401
+
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+def admin_required(f):
+
+    @wraps(f)
+    @token_required
+    def decorated(*args, **kwargs):
+        if request.user.get("role") != "admin":
+            return jsonify({
+                "success": False,
+                "message": "Admin access required"
+            }), 403
 
         return f(*args, **kwargs)
 
@@ -601,11 +638,10 @@ def create_user():
             "message": "full_name, email, and password are required"
         }), 400
 
-    valid_roles = ("borrower", "lender", "rep", "admin", "agent")
-    if role not in valid_roles:
+    if role not in ALLOWED_ROLES:
         return jsonify({
             "success": False,
-            "message": f"Invalid role. Must be one of: {', '.join(valid_roles)}"
+            "message": f"Invalid role. Must be one of: {', '.join(ALLOWED_ROLES)}"
         }), 400
 
     connection = get_connection()
@@ -769,6 +805,437 @@ def delete_user(user_id):
         return jsonify({
             "success": True,
             "message": "User deleted successfully"
+        })
+
+    finally:
+        connection.close()
+
+
+# ── Admin: User Management ──────────────────────────────────────────
+
+@app.route("/api/admin/users", methods=["GET"])
+@admin_required
+def admin_get_users():
+
+    search = request.args.get("search")
+    role = request.args.get("role")
+    is_active = request.args.get("is_active")
+    page = request.args.get("page", 1, type=int)
+    limit = request.args.get("limit", 20, type=int)
+
+    page = max(page, 1)
+    if limit < 1 or limit > 100:
+        limit = 20
+
+    if role and role not in ALLOWED_ROLES:
+        return jsonify({
+            "success": False,
+            "message": f"Invalid role. Must be one of: {', '.join(ALLOWED_ROLES)}"
+        }), 400
+
+    if is_active is not None and is_active not in ("0", "1"):
+        return jsonify({
+            "success": False,
+            "message": "is_active must be 0 or 1"
+        }), 400
+
+    filters = []
+    params = []
+
+    if search:
+        filters.append(
+            """
+            (
+                full_name LIKE %s
+                OR email LIKE %s
+                OR student_number LIKE %s
+                OR phone_number LIKE %s
+            )
+            """
+        )
+        search_term = f"%{search}%"
+        params.extend([search_term, search_term, search_term, search_term])
+
+    if role:
+        filters.append("role = %s")
+        params.append(role)
+
+    if is_active is not None:
+        filters.append("is_active = %s")
+        params.append(int(is_active))
+
+    where_sql = ""
+    if filters:
+        where_sql = "WHERE " + " AND ".join(filters)
+
+    offset = (page - 1) * limit
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT COUNT(*) AS total FROM users {where_sql}",
+                params
+            )
+            total = cursor.fetchone()["total"]
+
+            cursor.execute(
+                f"""
+                SELECT id, student_number, full_name, university, email,
+                       phone_number, role, is_active, is_verified,
+                       failed_attempts, last_login_at, created_at, updated_at
+                FROM users
+                {where_sql}
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                params + [limit, offset]
+            )
+            users = cursor.fetchall()
+
+        return jsonify({
+            "success": True,
+            "data": [serialize_user(user) for user in users],
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "total_pages": (total + limit - 1) // limit
+            }
+        })
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/admin/users/<int:user_id>", methods=["GET"])
+@admin_required
+def admin_get_user(user_id):
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, student_number, full_name, university, email,
+                       phone_number, role, is_active, is_verified,
+                       failed_attempts, last_login_at, created_at, updated_at
+                FROM users
+                WHERE id = %s
+                """,
+                (user_id,)
+            )
+            user = cursor.fetchone()
+
+        if not user:
+            return jsonify({
+                "success": False,
+                "message": "User not found"
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "data": serialize_user(user)
+        })
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/admin/users", methods=["POST"])
+@admin_required
+def admin_create_user():
+
+    data = request.get_json(silent=True) or {}
+
+    student_number = data.get("student_number")
+    full_name = data.get("full_name")
+    university = data.get("university")
+    email = data.get("email")
+    phone_number = data.get("phone_number")
+    role = data.get("role", "borrower")
+    password = data.get("password")
+    is_active = data.get("is_active", 1)
+    is_verified = data.get("is_verified", 0)
+
+    if not full_name or not password:
+        return jsonify({
+            "success": False,
+            "message": "full_name and password are required"
+        }), 400
+
+    if not email and not phone_number:
+        return jsonify({
+            "success": False,
+            "message": "Either email or phone_number is required"
+        }), 400
+
+    if role not in ALLOWED_ROLES:
+        return jsonify({
+            "success": False,
+            "message": f"Invalid role. Must be one of: {', '.join(ALLOWED_ROLES)}"
+        }), 400
+
+    if len(password) < 8:
+        return jsonify({
+            "success": False,
+            "message": "Password must be at least 8 characters"
+        }), 400
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            if email:
+                cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
+                if cursor.fetchone():
+                    return jsonify({
+                        "success": False,
+                        "message": "Email already exists"
+                    }), 409
+
+            if phone_number:
+                cursor.execute(
+                    "SELECT id FROM users WHERE phone_number = %s",
+                    (phone_number,)
+                )
+                if cursor.fetchone():
+                    return jsonify({
+                        "success": False,
+                        "message": "Phone number already exists"
+                    }), 409
+
+            if student_number:
+                cursor.execute(
+                    "SELECT id FROM users WHERE student_number = %s",
+                    (student_number,)
+                )
+                if cursor.fetchone():
+                    return jsonify({
+                        "success": False,
+                        "message": "Student number already exists"
+                    }), 409
+
+            cursor.execute(
+                """
+                INSERT INTO users (
+                    student_number, full_name, university, email, phone_number,
+                    role, password_hash, is_active, is_verified, failed_attempts
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    student_number,
+                    full_name,
+                    university,
+                    email,
+                    phone_number,
+                    role,
+                    generate_password_hash(password),
+                    int(bool(is_active)),
+                    int(bool(is_verified)),
+                    0
+                )
+            )
+            new_user_id = cursor.lastrowid
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "User created successfully",
+            "user_id": new_user_id
+        }), 201
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/admin/users/<int:user_id>", methods=["PATCH"])
+@admin_required
+def admin_update_user(user_id):
+
+    data = request.get_json(silent=True) or {}
+    allowed_fields = (
+        "student_number",
+        "full_name",
+        "university",
+        "email",
+        "phone_number",
+        "role",
+        "is_active",
+        "is_verified",
+    )
+
+    if "role" in data and data["role"] not in ALLOWED_ROLES:
+        return jsonify({
+            "success": False,
+            "message": f"Invalid role. Must be one of: {', '.join(ALLOWED_ROLES)}"
+        }), 400
+
+    updates = []
+    params = []
+
+    for field in allowed_fields:
+        if field in data:
+            updates.append(f"`{field}` = %s")
+            if field in ("is_active", "is_verified"):
+                params.append(int(bool(data[field])))
+            else:
+                params.append(data[field])
+
+    if not updates:
+        return jsonify({
+            "success": False,
+            "message": "No valid fields provided"
+        }), 400
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+            if not cursor.fetchone():
+                return jsonify({
+                    "success": False,
+                    "message": "User not found"
+                }), 404
+
+            if data.get("email"):
+                cursor.execute(
+                    "SELECT id FROM users WHERE email = %s AND id != %s",
+                    (data["email"], user_id)
+                )
+                if cursor.fetchone():
+                    return jsonify({
+                        "success": False,
+                        "message": "Email already exists"
+                    }), 409
+
+            if data.get("phone_number"):
+                cursor.execute(
+                    "SELECT id FROM users WHERE phone_number = %s AND id != %s",
+                    (data["phone_number"], user_id)
+                )
+                if cursor.fetchone():
+                    return jsonify({
+                        "success": False,
+                        "message": "Phone number already exists"
+                    }), 409
+
+            if data.get("student_number"):
+                cursor.execute(
+                    "SELECT id FROM users WHERE student_number = %s AND id != %s",
+                    (data["student_number"], user_id)
+                )
+                if cursor.fetchone():
+                    return jsonify({
+                        "success": False,
+                        "message": "Student number already exists"
+                    }), 409
+
+            params.append(user_id)
+            cursor.execute(
+                f"UPDATE users SET {', '.join(updates)} WHERE id = %s",
+                params
+            )
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "User updated successfully"
+        })
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/admin/users/<int:user_id>/status", methods=["PATCH"])
+@admin_required
+def admin_update_user_status(user_id):
+
+    data = request.get_json(silent=True) or {}
+    is_active = data.get("is_active")
+
+    if is_active is None:
+        return jsonify({
+            "success": False,
+            "message": "is_active is required"
+        }), 400
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+            if not cursor.fetchone():
+                return jsonify({
+                    "success": False,
+                    "message": "User not found"
+                }), 404
+
+            cursor.execute(
+                "UPDATE users SET is_active = %s WHERE id = %s",
+                (int(bool(is_active)), user_id)
+            )
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "User status updated successfully"
+        })
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/admin/users/<int:user_id>/reset-password", methods=["PATCH"])
+@admin_required
+def admin_reset_user_password(user_id):
+
+    data = request.get_json(silent=True) or {}
+    new_password = data.get("password")
+
+    if not new_password:
+        return jsonify({
+            "success": False,
+            "message": "password is required"
+        }), 400
+
+    if len(new_password) < 8:
+        return jsonify({
+            "success": False,
+            "message": "Password must be at least 8 characters"
+        }), 400
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+            if not cursor.fetchone():
+                return jsonify({
+                    "success": False,
+                    "message": "User not found"
+                }), 404
+
+            cursor.execute(
+                """
+                UPDATE users
+                SET password_hash = %s, failed_attempts = 0
+                WHERE id = %s
+                """,
+                (generate_password_hash(new_password), user_id)
+            )
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Password reset successfully"
         })
 
     finally:
