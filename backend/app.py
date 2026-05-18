@@ -46,6 +46,24 @@ def serialize_user(user):
     }
 
 
+def serialize_university(university):
+    return {
+        "id": university["id"],
+        "name": university["name"],
+        "code": university.get("code"),
+        "city": university.get("city"),
+        "is_active": bool(university["is_active"]),
+        "created_at": (
+            university["created_at"].isoformat()
+            if university.get("created_at") else None
+        ),
+        "updated_at": (
+            university["updated_at"].isoformat()
+            if university.get("updated_at") else None
+        ),
+    }
+
+
 def generate_token(user):
 
     payload = {
@@ -1236,6 +1254,285 @@ def admin_reset_user_password(user_id):
         return jsonify({
             "success": True,
             "message": "Password reset successfully"
+        })
+
+    finally:
+        connection.close()
+
+
+# ── Admin: University Management ────────────────────────────────────
+
+@app.route("/api/admin/universities", methods=["GET"])
+def admin_get_universities():
+
+    search = request.args.get("search")
+    is_active = request.args.get("is_active")
+    page = request.args.get("page", 1, type=int)
+    limit = request.args.get("limit", 20, type=int)
+
+    page = max(page, 1)
+    if limit < 1 or limit > 100:
+        limit = 20
+
+    if is_active is not None and is_active not in ("0", "1"):
+        return jsonify({
+            "success": False,
+            "message": "is_active must be 0 or 1"
+        }), 400
+
+    filters = []
+    params = []
+
+    if search:
+        filters.append("(name LIKE %s OR code LIKE %s OR city LIKE %s)")
+        search_term = f"%{search}%"
+        params.extend([search_term, search_term, search_term])
+
+    if is_active is not None:
+        filters.append("is_active = %s")
+        params.append(int(is_active))
+
+    where_sql = ""
+    if filters:
+        where_sql = "WHERE " + " AND ".join(filters)
+
+    offset = (page - 1) * limit
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT COUNT(*) AS total FROM universities {where_sql}",
+                params
+            )
+            total = cursor.fetchone()["total"]
+
+            cursor.execute(
+                f"""
+                SELECT id, name, code, city, is_active, created_at, updated_at
+                FROM universities
+                {where_sql}
+                ORDER BY name ASC
+                LIMIT %s OFFSET %s
+                """,
+                params + [limit, offset]
+            )
+            universities = cursor.fetchall()
+
+        return jsonify({
+            "success": True,
+            "data": [
+                serialize_university(university)
+                for university in universities
+            ],
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "total_pages": (total + limit - 1) // limit
+            }
+        })
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/admin/universities/<int:university_id>", methods=["GET"])
+@admin_required
+def admin_get_university(university_id):
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, name, code, city, is_active, created_at, updated_at
+                FROM universities
+                WHERE id = %s
+                """,
+                (university_id,)
+            )
+            university = cursor.fetchone()
+
+        if not university:
+            return jsonify({
+                "success": False,
+                "message": "University not found"
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "data": serialize_university(university)
+        })
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/admin/universities", methods=["POST"])
+@admin_required
+def admin_create_university():
+
+    data = request.get_json(silent=True) or {}
+    name = data.get("name")
+    code = data.get("code")
+    city = data.get("city")
+    is_active = data.get("is_active", 1)
+
+    if not name:
+        return jsonify({
+            "success": False,
+            "message": "name is required"
+        }), 400
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id FROM universities WHERE name = %s", (name,))
+            if cursor.fetchone():
+                return jsonify({
+                    "success": False,
+                    "message": "University name already exists"
+                }), 409
+
+            if code:
+                cursor.execute(
+                    "SELECT id FROM universities WHERE code = %s",
+                    (code,)
+                )
+                if cursor.fetchone():
+                    return jsonify({
+                        "success": False,
+                        "message": "University code already exists"
+                    }), 409
+
+            cursor.execute(
+                """
+                INSERT INTO universities (name, code, city, is_active)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (name, code, city, int(bool(is_active)))
+            )
+            university_id = cursor.lastrowid
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "University created successfully",
+            "university_id": university_id
+        }), 201
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/admin/universities/<int:university_id>", methods=["PATCH"])
+@admin_required
+def admin_update_university(university_id):
+
+    data = request.get_json(silent=True) or {}
+    allowed_fields = ("name", "code", "city", "is_active")
+    updates = []
+    params = []
+
+    for field in allowed_fields:
+        if field in data:
+            updates.append(f"`{field}` = %s")
+            if field == "is_active":
+                params.append(int(bool(data[field])))
+            else:
+                params.append(data[field])
+
+    if not updates:
+        return jsonify({
+            "success": False,
+            "message": "No valid fields provided"
+        }), 400
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id FROM universities WHERE id = %s",
+                (university_id,)
+            )
+            if not cursor.fetchone():
+                return jsonify({
+                    "success": False,
+                    "message": "University not found"
+                }), 404
+
+            if data.get("name"):
+                cursor.execute(
+                    "SELECT id FROM universities WHERE name = %s AND id != %s",
+                    (data["name"], university_id)
+                )
+                if cursor.fetchone():
+                    return jsonify({
+                        "success": False,
+                        "message": "University name already exists"
+                    }), 409
+
+            if data.get("code"):
+                cursor.execute(
+                    "SELECT id FROM universities WHERE code = %s AND id != %s",
+                    (data["code"], university_id)
+                )
+                if cursor.fetchone():
+                    return jsonify({
+                        "success": False,
+                        "message": "University code already exists"
+                    }), 409
+
+            params.append(university_id)
+            cursor.execute(
+                f"UPDATE universities SET {', '.join(updates)} WHERE id = %s",
+                params
+            )
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "University updated successfully"
+        })
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/admin/universities/<int:university_id>", methods=["DELETE"])
+@admin_required
+def admin_delete_university(university_id):
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id FROM universities WHERE id = %s",
+                (university_id,)
+            )
+            if not cursor.fetchone():
+                return jsonify({
+                    "success": False,
+                    "message": "University not found"
+                }), 404
+
+            cursor.execute(
+                "DELETE FROM universities WHERE id = %s",
+                (university_id,)
+            )
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "University deleted successfully"
         })
 
     finally:

@@ -222,6 +222,76 @@ Common admin errors:
 | `409` | `Phone number already exists` |
 | `409` | `Student number already exists` |
 
+## Admin university management
+
+The list route is public. Get, create, update, and delete routes require a bearer token whose user has `role: "admin"`.
+
+### List universities
+
+`GET /api/admin/universities`
+
+This route does not require authentication.
+
+Query parameters:
+
+| Name | Description |
+|---|---|
+| `search` | Optional search across `name`, `code`, and `city` |
+| `is_active` | Optional status filter: `0` or `1` |
+| `page` | Optional page number, defaults to `1` |
+| `limit` | Optional page size from `1` to `100`, defaults to `20` |
+
+### Get a university
+
+`GET /api/admin/universities/{university_id}`
+
+### Create a university
+
+`POST /api/admin/universities`
+
+Request:
+
+```json
+{
+  "name": "University of Zambia",
+  "code": "UNZA",
+  "city": "Lusaka",
+  "is_active": 1
+}
+```
+
+Success response:
+
+```json
+{
+  "success": true,
+  "message": "University created successfully",
+  "university_id": 1
+}
+```
+
+### Update a university
+
+`PATCH /api/admin/universities/{university_id}`
+
+Allowed fields: `name`, `code`, `city`, `is_active`.
+
+### Delete a university
+
+`DELETE /api/admin/universities/{university_id}`
+
+Common university errors:
+
+| Status | Message |
+|---|---|
+| `400` | `name is required` |
+| `400` | `No valid fields provided` |
+| `401` | `Token missing` |
+| `403` | `Admin access required` |
+| `404` | `University not found` |
+| `409` | `University name already exists` |
+| `409` | `University code already exists` |
+
 ## Zamtel SMS configuration
 
 Set these variables in `backend/.env`:

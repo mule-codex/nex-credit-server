@@ -81,6 +81,21 @@ CREATE TABLE IF NOT EXISTS `login_otps` (
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `universities` (
+  `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name` varchar(120) NOT NULL,
+  `code` varchar(30) DEFAULT NULL,
+  `city` varchar(100) DEFAULT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_universities_name` (`name`),
+  UNIQUE KEY `uk_universities_code` (`code`),
+  KEY `idx_universities_is_active` (`is_active`),
+  KEY `idx_universities_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `loans` (
   `id` char(36) NOT NULL,
   `reference_code` varchar(30) NOT NULL,

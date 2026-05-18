@@ -227,6 +227,11 @@ GET    /api/admin/users/<id>               Admin get user
 PATCH  /api/admin/users/<id>               Admin update user
 PATCH  /api/admin/users/<id>/status        Admin activate/deactivate user
 PATCH  /api/admin/users/<id>/reset-password Admin reset user password
+GET    /api/admin/universities             Public list universities
+POST   /api/admin/universities             Admin create university
+GET    /api/admin/universities/<id>        Admin get university
+PATCH  /api/admin/universities/<id>        Admin update university
+DELETE /api/admin/universities/<id>        Admin delete university
 
 GET    /students/<student_number>/check    Pre-loan check (BC status + loan count)
 GET    /students/<id>/profile              Student profile

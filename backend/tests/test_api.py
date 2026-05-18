@@ -92,6 +92,37 @@ def _create_user_direct(role="borrower"):
     }
 
 
+def _create_university_direct(is_active=1):
+    unique = uuid4().hex
+    connection = app_module.get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO universities (name, code, city, is_active)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    f"University {unique}",
+                    f"U{unique[:8]}",
+                    "Lusaka",
+                    is_active,
+                )
+            )
+            university_id = cursor.lastrowid
+        connection.commit()
+    finally:
+        connection.close()
+
+    return {
+        "id": university_id,
+        "name": f"University {unique}",
+        "code": f"U{unique[:8]}",
+        "city": "Lusaka",
+        "is_active": is_active,
+    }
+
+
 @pytest.fixture
 def admin_token():
     admin = _create_user_direct(role="admin")
@@ -512,3 +543,129 @@ class TestAdminUsers:
 
         assert resp.status_code == 400
         assert "Invalid role" in data["message"]
+
+
+class TestAdminUniversities:
+
+    def test_list_universities_is_public(self, client):
+        university = _create_university_direct(is_active=1)
+
+        resp = client.get(f"/api/admin/universities?search={university['code']}")
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert any(item["id"] == university["id"] for item in data["data"])
+
+    def test_admin_university_write_routes_require_admin_role(self, client, auth_token):
+        resp = client.post(
+            "/api/admin/universities",
+            headers=_headers(auth_token),
+            json={"name": f"Unauthorized {uuid4().hex}"},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 403
+        assert data["message"] == "Admin access required"
+
+    def test_admin_create_and_get_university(self, client, admin_token):
+        unique = uuid4().hex
+        payload = {
+            "name": f"Copperbelt University {unique}",
+            "code": f"CBU{unique[:6]}",
+            "city": "Kitwe",
+            "is_active": 1,
+        }
+
+        create_resp = client.post(
+            "/api/admin/universities",
+            headers=_headers(admin_token),
+            json=payload,
+        )
+        create_data = json.loads(create_resp.data)
+
+        assert create_resp.status_code == 201
+        assert create_data["success"] is True
+
+        get_resp = client.get(
+            f"/api/admin/universities/{create_data['university_id']}",
+            headers=_headers(admin_token),
+        )
+        get_data = json.loads(get_resp.data)
+
+        assert get_resp.status_code == 200
+        assert get_data["data"]["name"] == payload["name"]
+        assert get_data["data"]["code"] == payload["code"]
+        assert get_data["data"]["city"] == "Kitwe"
+        assert get_data["data"]["is_active"] is True
+
+    def test_admin_list_universities_with_filters(self, client, admin_token):
+        university = _create_university_direct(is_active=1)
+
+        resp = client.get(
+            f"/api/admin/universities?search={university['code']}&is_active=1",
+            headers=_headers(admin_token),
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert data["pagination"]["total"] >= 1
+        assert any(item["id"] == university["id"] for item in data["data"])
+
+    def test_admin_update_university(self, client, admin_token):
+        university = _create_university_direct()
+
+        resp = client.patch(
+            f"/api/admin/universities/{university['id']}",
+            headers=_headers(admin_token),
+            json={"name": f"{university['name']} Updated", "city": "Ndola"},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["message"] == "University updated successfully"
+
+        get_resp = client.get(
+            f"/api/admin/universities/{university['id']}",
+            headers=_headers(admin_token),
+        )
+        get_data = json.loads(get_resp.data)
+
+        assert get_data["data"]["name"].endswith("Updated")
+        assert get_data["data"]["city"] == "Ndola"
+
+    def test_admin_delete_university(self, client, admin_token):
+        university = _create_university_direct()
+
+        resp = client.delete(
+            f"/api/admin/universities/{university['id']}",
+            headers=_headers(admin_token),
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["message"] == "University deleted successfully"
+
+        get_resp = client.get(
+            f"/api/admin/universities/{university['id']}",
+            headers=_headers(admin_token),
+        )
+
+        assert get_resp.status_code == 404
+
+    def test_admin_rejects_duplicate_university_name(self, client, admin_token):
+        university = _create_university_direct()
+
+        resp = client.post(
+            "/api/admin/universities",
+            headers=_headers(admin_token),
+            json={
+                "name": university["name"],
+                "code": f"DUP{uuid4().hex[:6]}",
+            },
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 409
+        assert data["message"] == "University name already exists"
