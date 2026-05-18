@@ -225,9 +225,14 @@ class TestAuth:
         assert captured["method"] == "POST"
         assert captured["timeout"] == 10
         assert "/api_key/test-key/" in captured["url"]
-        assert "/contacts/0970000000/" in captured["url"]
+        assert "/contacts/260970000000/" in captured["url"]
         assert "/senderId/HelsBCredit/" in captured["url"]
         assert "Your HelsB Credit login OTP is 123456" in unquote(captured["url"])
+
+    def test_normalize_phone_number_for_zamtel(self):
+        assert app_module.normalize_phone_number("0970000000") == "260970000000"
+        assert app_module.normalize_phone_number("+260970000000") == "260970000000"
+        assert app_module.normalize_phone_number("260970000000") == "260970000000"
 
     def test_protected_no_token(self, client):
         resp = client.get("/api/protected")

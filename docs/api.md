@@ -138,8 +138,10 @@ ZAMTEL_SENDER_ID=your-zamtel-sender-id
 ZAMTEL_BASE_URL=https://bulksms.zamtel.co.zm/api/v2.1/action/send/
 ```
 
-The OTP sender performs a `POST` request using this Zamtel path shape:
+The OTP sender implements the Bulk SMS third-party interface v2.1.1. It sends a `POST` request using this official path shape:
 
 ```text
-{ZAMTEL_BASE_URL}/api_key/{ZAMTEL_API_KEY}/contacts/{phone_number}/senderId/{ZAMTEL_SENDER_ID}/message/{message}
+https://bulksms.zamtel.co.zm/api/v2.1/action/send/api_key/:api_key/contacts/:contacts/senderId/:sender_id/message/:message
 ```
+
+Phone numbers are normalized to Zamtel's `260...` contact format before sending. For example, `0970000000`, `+260970000000`, and `260970000000` are sent as `260970000000`.

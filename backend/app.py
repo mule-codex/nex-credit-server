@@ -51,6 +51,18 @@ def utc_now():
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+def normalize_phone_number(phone_number):
+    digits = "".join(ch for ch in phone_number if ch.isdigit())
+
+    if digits.startswith("260") and len(digits) == 12:
+        return digits
+
+    if digits.startswith("0") and len(digits) == 10:
+        return f"260{digits[1:]}"
+
+    return digits
+
+
 def get_otp_expires_at():
     ttl_seconds = int(os.getenv("LOGIN_OTP_EXPIRES_SECONDS", "300"))
     return utc_now() + timedelta(seconds=ttl_seconds)
@@ -77,11 +89,12 @@ def send_otp_sms(phone_number, otp):
     if not api_key or not sender_id:
         raise RuntimeError("Zamtel SMS credentials are not configured")
 
+    zamtel_phone_number = normalize_phone_number(phone_number)
     message = f"Your HelsB Credit login OTP is {otp}. It expires in 5 minutes."
     endpoint = (
         f"{base_url.rstrip('/')}/"
         f"api_key/{quote(api_key, safe='')}/"
-        f"contacts/{quote(phone_number, safe='')}/"
+        f"contacts/{quote(zamtel_phone_number, safe='')}/"
         f"senderId/{quote(sender_id, safe='')}/"
         f"message/{quote(message, safe='')}"
     )
