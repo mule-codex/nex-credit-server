@@ -1,3 +1,5 @@
+
+
 import os
 import secrets
 from urllib.parse import quote
@@ -25,6 +27,16 @@ CORS(app)
 
 ALLOWED_ROLES = ("borrower", "lender", "rep", "admin", "agent")
 
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    import traceback
+    traceback.print_exc()
+
+    return jsonify({
+        "success": False,
+        "message": str(e)
+    }), 500
  
 def serialize_university(university):
     return {
@@ -662,6 +674,699 @@ def login_otp():
     finally:
         connection.close()
 
+
+# =========================================
+# SERIALIZERS
+# =========================================
+
+def serialize_product(product):
+    return {
+        "id": product["id"],
+        "title": product["title"],
+        "description": product.get("description"),
+        "price": float(product["price"]),
+        "category": product.get("category"),
+        "image_url": product.get("image_url"),
+        "owner_id": product["owner_id"],
+        "is_available": bool(product["is_available"]),
+        "created_at": (
+            product["created_at"].isoformat()
+            if product.get("created_at")
+            else None
+        ),
+        "updated_at": (
+            product["updated_at"].isoformat()
+            if product.get("updated_at")
+            else None
+        ),
+    }
+
+
+def serialize_loan_listing(loan):
+    return {
+        "id": loan["id"],
+        "borrower_id": loan["borrower_id"],
+        "amount": float(loan["amount"]),
+        "interest_rate": float(loan["interest_rate"]),
+        "duration_months": loan["duration_months"],
+        "purpose": loan.get("purpose"),
+        "status": loan["status"],
+        "created_at": (
+            loan["created_at"].isoformat()
+            if loan.get("created_at")
+            else None
+        ),
+        "updated_at": (
+            loan["updated_at"].isoformat()
+            if loan.get("updated_at")
+            else None
+        ),
+    }
+
+
+# =========================================
+# PRODUCT ROUTES
+# =========================================
+
+@app.route("/api/products", methods=["POST"])
+@token_required
+def create_product():
+
+    data = request.get_json(silent=True) or {}
+
+    title = data.get("title")
+    description = data.get("description")
+    price = data.get("price")
+    category = data.get("category")
+    image_url = data.get("image_url")
+
+    if not title:
+        return jsonify({
+            "success": False,
+            "message": "title is required"
+        }), 400
+
+    if price is None:
+        return jsonify({
+            "success": False,
+            "message": "price is required"
+        }), 400
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                INSERT INTO products (
+                    title,
+                    description,
+                    price,
+                    category,
+                    image_url,
+                    owner_id,
+                    is_available
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    title,
+                    description,
+                    price,
+                    category,
+                    image_url,
+                    request.user["id"],
+                    1
+                )
+            )
+
+            product_id = cursor.lastrowid
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Product created successfully",
+            "product_id": product_id
+        }), 201
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/products", methods=["GET"])
+@token_required
+def get_products():
+
+    search = request.args.get("search")
+    category = request.args.get("category")
+    page = request.args.get("page", 1, type=int)
+    limit = request.args.get("limit", 20, type=int)
+
+    page = max(page, 1)
+
+    if limit < 1 or limit > 100:
+        limit = 20
+
+    filters = ["is_available = 1"]
+    params = []
+
+    if search:
+        filters.append(
+            """
+            (
+                title LIKE %s
+                OR description LIKE %s
+            )
+            """
+        )
+
+        search_term = f"%{search}%"
+
+        params.extend([search_term, search_term])
+
+    if category:
+        filters.append("category = %s")
+        params.append(category)
+
+    where_sql = "WHERE " + " AND ".join(filters)
+
+    offset = (page - 1) * limit
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM products
+                {where_sql}
+                """,
+                params
+            )
+
+            total = cursor.fetchone()["total"]
+
+            cursor.execute(
+                f"""
+                SELECT *
+                FROM products
+                {where_sql}
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                params + [limit, offset]
+            )
+
+            products = cursor.fetchall()
+
+        return jsonify({
+            "success": True,
+            "data": [
+                serialize_product(product)
+                for product in products
+            ],
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "total_pages": (
+                    (total + limit - 1) // limit
+                )
+            }
+        }), 200
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/products/<int:product_id>", methods=["GET"])
+@token_required
+def get_product(product_id):
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM products
+                WHERE id = %s
+                """,
+                (product_id,)
+            )
+
+            product = cursor.fetchone()
+
+        if not product:
+            return jsonify({
+                "success": False,
+                "message": "Product not found"
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "data": serialize_product(product)
+        }), 200
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/products/<int:product_id>", methods=["PATCH"])
+@token_required
+def update_product(product_id):
+
+    data = request.get_json(silent=True) or {}
+
+    allowed_fields = (
+        "title",
+        "description",
+        "price",
+        "category",
+        "image_url",
+        "is_available"
+    )
+
+    updates = []
+    params = []
+
+    for field in allowed_fields:
+
+        if field in data:
+
+            updates.append(f"`{field}` = %s")
+
+            if field == "is_available":
+                params.append(int(bool(data[field])))
+            else:
+                params.append(data[field])
+
+    if not updates:
+        return jsonify({
+            "success": False,
+            "message": "No valid fields provided"
+        }), 400
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM products
+                WHERE id = %s
+                """,
+                (product_id,)
+            )
+
+            product = cursor.fetchone()
+
+            if not product:
+                return jsonify({
+                    "success": False,
+                    "message": "Product not found"
+                }), 404
+
+            if product["owner_id"] != request.user["id"]:
+                return jsonify({
+                    "success": False,
+                    "message": "Unauthorized"
+                }), 403
+
+            params.append(product_id)
+
+            cursor.execute(
+                f"""
+                UPDATE products
+                SET {', '.join(updates)}
+                WHERE id = %s
+                """,
+                params
+            )
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Product updated successfully"
+        }), 200
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/products/<int:product_id>", methods=["DELETE"])
+@token_required
+def delete_product(product_id):
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM products
+                WHERE id = %s
+                """,
+                (product_id,)
+            )
+
+            product = cursor.fetchone()
+
+            if not product:
+                return jsonify({
+                    "success": False,
+                    "message": "Product not found"
+                }), 404
+
+            if product["owner_id"] != request.user["id"]:
+                return jsonify({
+                    "success": False,
+                    "message": "Unauthorized"
+                }), 403
+
+            cursor.execute(
+                """
+                DELETE FROM products
+                WHERE id = %s
+                """,
+                (product_id,)
+            )
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Product deleted successfully"
+        }), 200
+
+    finally:
+        connection.close()
+
+
+# =========================================
+# LOAN LISTING ROUTES
+# =========================================
+
+@app.route("/api/loan-listings", methods=["POST"])
+@token_required
+def create_loan_listing():
+
+    data = request.get_json(silent=True) or {}
+
+    amount = data.get("amount")
+    interest_rate = data.get("interest_rate")
+    duration_months = data.get("duration_months")
+    purpose = data.get("purpose")
+
+    if amount is None:
+        return jsonify({
+            "success": False,
+            "message": "amount is required"
+        }), 400
+
+    if interest_rate is None:
+        return jsonify({
+            "success": False,
+            "message": "interest_rate is required"
+        }), 400
+
+    if duration_months is None:
+        return jsonify({
+            "success": False,
+            "message": "duration_months is required"
+        }), 400
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                INSERT INTO loan_listings (
+                    borrower_id,
+                    amount,
+                    interest_rate,
+                    duration_months,
+                    purpose,
+                    status
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    request.user["id"],
+                    amount,
+                    interest_rate,
+                    duration_months,
+                    purpose,
+                    "OPEN"
+                )
+            )
+
+            loan_id = cursor.lastrowid
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Loan listing created successfully",
+            "loan_listing_id": loan_id
+        }), 201
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/loan-listings", methods=["GET"])
+@token_required
+def get_loan_listings():
+
+    status = request.args.get("status")
+    page = request.args.get("page", 1, type=int)
+    limit = request.args.get("limit", 20, type=int)
+
+    page = max(page, 1)
+
+    if limit < 1 or limit > 100:
+        limit = 20
+
+    filters = []
+    params = []
+
+    if status:
+        filters.append("status = %s")
+        params.append(status)
+
+    where_sql = ""
+
+    if filters:
+        where_sql = "WHERE " + " AND ".join(filters)
+
+    offset = (page - 1) * limit
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                f"""
+                SELECT COUNT(*) AS total
+                FROM loan_listings
+                {where_sql}
+                """,
+                params
+            )
+
+            total = cursor.fetchone()["total"]
+
+            cursor.execute(
+                f"""
+                SELECT *
+                FROM loan_listings
+                {where_sql}
+                ORDER BY created_at DESC
+                LIMIT %s OFFSET %s
+                """,
+                params + [limit, offset]
+            )
+
+            loans = cursor.fetchall()
+
+        return jsonify({
+            "success": True,
+            "data": [
+                serialize_loan_listing(loan)
+                for loan in loans
+            ],
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "total_pages": (
+                    (total + limit - 1) // limit
+                )
+            }
+        }), 200
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/loan-listings/<int:loan_id>", methods=["GET"])
+@token_required
+def get_loan_listing(loan_id):
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM loan_listings
+                WHERE id = %s
+                """,
+                (loan_id,)
+            )
+
+            loan = cursor.fetchone()
+
+        if not loan:
+            return jsonify({
+                "success": False,
+                "message": "Loan listing not found"
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "data": serialize_loan_listing(loan)
+        }), 200
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/loan-listings/<int:loan_id>", methods=["PATCH"])
+@token_required
+def update_loan_listing(loan_id):
+
+    data = request.get_json(silent=True) or {}
+
+    allowed_fields = (
+        "amount",
+        "interest_rate",
+        "duration_months",
+        "purpose",
+        "status"
+    )
+
+    updates = []
+    params = []
+
+    for field in allowed_fields:
+
+        if field in data:
+            updates.append(f"`{field}` = %s")
+            params.append(data[field])
+
+    if not updates:
+        return jsonify({
+            "success": False,
+            "message": "No valid fields provided"
+        }), 400
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM loan_listings
+                WHERE id = %s
+                """,
+                (loan_id,)
+            )
+
+            loan = cursor.fetchone()
+
+            if not loan:
+                return jsonify({
+                    "success": False,
+                    "message": "Loan listing not found"
+                }), 404
+
+            if loan["borrower_id"] != request.user["id"]:
+                return jsonify({
+                    "success": False,
+                    "message": "Unauthorized"
+                }), 403
+
+            params.append(loan_id)
+
+            cursor.execute(
+                f"""
+                UPDATE loan_listings
+                SET {', '.join(updates)}
+                WHERE id = %s
+                """,
+                params
+            )
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Loan listing updated successfully"
+        }), 200
+
+    finally:
+        connection.close()
+
+
+@app.route("/api/loan-listings/<int:loan_id>", methods=["DELETE"])
+@token_required
+def delete_loan_listing(loan_id):
+
+    connection = get_connection()
+
+    try:
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT *
+                FROM loan_listings
+                WHERE id = %s
+                """,
+                (loan_id,)
+            )
+
+            loan = cursor.fetchone()
+
+            if not loan:
+                return jsonify({
+                    "success": False,
+                    "message": "Loan listing not found"
+                }), 404
+
+            if loan["borrower_id"] != request.user["id"]:
+                return jsonify({
+                    "success": False,
+                    "message": "Unauthorized"
+                }), 403
+
+            cursor.execute(
+                """
+                DELETE FROM loan_listings
+                WHERE id = %s
+                """,
+                (loan_id,)
+            )
+
+        connection.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Loan listing deleted successfully"
+        }), 200
+
+    finally:
+        connection.close()
 # =========================
 # GET CURRENT USER
 # =========================

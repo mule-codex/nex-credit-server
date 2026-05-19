@@ -21,15 +21,15 @@ Backend API for NexCredit built with Flask, JWT authentication, OTP login, MySQL
 
 Production:
 
-```txt
+ txt
 https://funsa.online
-```
+ 
 
 Local:
 
-```txt
+ txt
 http://127.0.0.1:5000
-```
+ 
 
 ---
 
@@ -39,9 +39,9 @@ The API uses JWT Bearer Tokens.
 
 After login verification, include the token in headers:
 
-```http
+ http
 Authorization: Bearer YOUR_JWT_TOKEN
-```
+ 
 
 ---
 
@@ -49,7 +49,7 @@ Authorization: Bearer YOUR_JWT_TOKEN
 
 Create a `.env` file:
 
-```env
+ env
 SECRET_KEY=super-secret-key
 
 ZAMTEL_API_KEY=your_api_key
@@ -57,7 +57,7 @@ ZAMTEL_SENDER_ID=your_sender_id
 ZAMTEL_BASE_URL=https://bulksms.zamtel.co.zm/api/v2.1/action/send/
 
 LOGIN_OTP_EXPIRES_SECONDS=300
-```
+ 
 
 ---
 
@@ -65,42 +65,42 @@ LOGIN_OTP_EXPIRES_SECONDS=300
 
 ## Clone Repository
 
-```bash
+ bash
 git clone https://github.com/yourusername/nexcredit.git
 cd nexcredit
-```
+ 
 
 ## Create Virtual Environment
 
-```bash
+ bash
 python -m venv venv
-```
+ 
 
 ## Activate Virtual Environment
 
 ### Windows
 
-```bash
+ bash
 venv\Scripts\activate
-```
+ 
 
 ### Linux / Mac
 
-```bash
+ bash
 source venv/bin/activate
-```
+ 
 
 ## Install Dependencies
 
-```bash
+ bash
 pip install -r requirements.txt
-```
+ 
 
 ## Run Server
 
-```bash
+ bash
 python app.py
-```
+ 
 
 ---
 
@@ -114,12 +114,12 @@ Returns API status.
 
 ### Response
 
-```json
+ 
 {
   "success": true,
   "message": "JWT API running"
 }
-```
+ 
 
 ---
 
@@ -131,21 +131,21 @@ Returns API status.
 
 ### Request
 
-```json
+ 
 {
   "phone_number": "260975223474"
 }
-```
+ 
 
 ### Response
 
-```json
+ 
 {
   "success": true,
   "message": "OTP sent successfully",
   "otp_session_id": "uuid"
 }
-```
+ 
 
 ---
 
@@ -155,16 +155,16 @@ Returns API status.
 
 ### Request
 
-```json
+ 
 {
   "phone_number": "260975223474",
   "otp": "123456"
 }
-```
+ 
 
 ### Response
 
-```json
+ 
 {
   "success": true,
   "message": "Login successful",
@@ -176,7 +176,7 @@ Returns API status.
     "is_verified": true
   }
 }
-```
+ 
 
 ---
 
@@ -186,18 +186,18 @@ Returns API status.
 
 ### Headers
 
-```http
+ http
 Authorization: Bearer TOKEN
-```
+ 
 
 ### Response
 
-```json
+ 
 {
   "success": true,
   "user": {}
 }
-```
+ 
 
 ---
 
@@ -205,9 +205,9 @@ Authorization: Bearer TOKEN
 
 Admin routes require:
 
-```txt
+ txt
 role = admin
-```
+ 
 
 ---
 
@@ -229,9 +229,9 @@ role = admin
 
 ### Example
 
-```txt
+ txt
 /api/admin/users?page=1&limit=20
-```
+ 
 
 ---
 
@@ -247,7 +247,7 @@ role = admin
 
 ### Request
 
-```json
+ 
 {
   "full_name": "John Doe",
   "email": "john@example.com",
@@ -255,7 +255,7 @@ role = admin
   "role": "borrower",
   "password": "password123"
 }
-```
+ 
 
 ---
 
@@ -265,11 +265,11 @@ role = admin
 
 ### Request
 
-```json
+ 
 {
   "full_name": "Updated Name"
 }
-```
+ 
 
 ---
 
@@ -279,11 +279,11 @@ role = admin
 
 ### Request
 
-```json
+ 
 {
   "is_active": 1
 }
-```
+ 
 
 ---
 
@@ -293,11 +293,11 @@ role = admin
 
 ### Request
 
-```json
+ 
 {
   "password": "newpassword123"
 }
-```
+ 
 
 ---
 
@@ -317,13 +317,13 @@ role = admin
 
 ### Request
 
-```json
+ 
 {
   "name": "University of Zambia",
   "code": "UNZA",
   "city": "Lusaka"
 }
-```
+ 
 
 ---
 
@@ -343,13 +343,13 @@ role = admin
 
 Supported roles:
 
-```txt
+ txt
 borrower
 lender
 rep
 admin
 agent
-```
+ 
 
 ---
 
@@ -392,30 +392,30 @@ agent
 
 ## Login
 
-```bash
+ bash
 curl -X POST https://funsa.online/api/login ^
 -H "Content-Type: application/json" ^
 -d "{\"phone_number\":\"260975223474\"}"
-```
+ 
 
 ---
 
 ## Verify OTP
 
-```bash
+ bash
 curl -X POST https://funsa.online/api/login/otp ^
 -H "Content-Type: application/json" ^
 -d "{\"phone_number\":\"260975223474\",\"otp\":\"123456\"}"
-```
+ 
 
 ---
 
 ## Get Current User
 
-```bash
+ bash
 curl -X GET https://funsa.online/api/me ^
 -H "Authorization: Bearer YOUR_TOKEN"
-```
+ 
 
 ---
 
@@ -430,9 +430,9 @@ Production uses:
 
 Entry point:
 
-```python
+ python
 application = app
-```
+ 
 
 ---
 

@@ -1,312 +1,738 @@
-# API Documentation
+# Funsa API Documentation
 
-Base URL for local development: `http://localhost:5000`
-
-All request and response bodies are JSON.
+Base URL:
+[https://funsa.online] 
 
 ## Authentication
 
-### Register
+Most endpoints require a Bearer token.
 
-Creates a user account. Login is phone-based, so include `phone_number` for users who need to sign in.
+Add this header to authenticated requests:
 
-`POST /api/register`
+ http
+Authorization: Bearer YOUR_JWT_TOKEN
+ 
 
-Request:
+---
 
-```json
+# Authentication Routes
+
+## Login / Auto Register
+
+Creates a new borrower account automatically if the phone number does not already exist, then sends an OTP via SMS.
+
+### Endpoint
+
+ http
+POST /api/login
+ 
+
+### Full URL
+
+ http
+https://funsa.online/api/login
+ 
+
+### Request Body
+
+ 
 {
-  "full_name": "Chanda Banda",
-  "email": "chanda@example.com",
-  "phone_number": "0970000000",
-  "password": "pass123"
+  "phone_number": "0977123456"
 }
-```
+ 
 
-Success response:
+### Success Response
 
-```json
+ 
 {
   "success": true,
-  "message": "User registered successfully"
+  "message": "OTP sent successfully",
+  "otp_session_id": "8c64b4dc-74df-41cb-88a8-ef5dbef4c58"
 }
-```
+ 
 
-Common errors:
+### Error Responses
 
-| Status | Message |
-|---|---|
-| `400` | `Missing required fields` |
-| `409` | `Email already exists` |
-| `409` | `Phone number already exists` |
-
-### Request login OTP
-
-Starts login with only the user's phone number. The server generates a 6-digit OTP, saves it in `login_otps`, and sends it using the configured Zamtel SMS API.
-
-`POST /api/login`
-
-Request:
-
-```json
+ 
 {
-  "phone_number": "0970000000"
+  "success": false,
+  "message": "phone_number is required"
 }
-```
+ 
 
-Success response:
-
-```json
+ 
 {
-  "success": true,
-  "message": "OTP sent successfully"
+  "success": false,
+  "message": "Account disabled"
 }
-```
+ 
 
-Common errors:
+---
 
-| Status | Message |
-|---|---|
-| `400` | `Phone number required` |
-| `404` | `Phone number not registered` |
-| `403` | `Account disabled` |
-| `502` | `Zamtel SMS credentials are not configured` |
+## Verify Login OTP
 
-### Submit login OTP
+Verifies OTP and returns a JWT token.
 
-Completes login with the phone number and OTP. A valid, unexpired, unused OTP is marked consumed and the response returns a JWT plus the user object.
+### Endpoint
 
-`POST /api/login/otp`
+ http
+POST /api/login/otp
+ 
 
-Request:
+### Full URL
 
-```json
+ http
+https://funsa.online/api/login/otp
+ 
+
+### Request Body
+
+ 
 {
-  "phone_number": "0970000000",
+  "phone_number": "0977123456",
   "otp": "123456"
 }
-```
+ 
 
-Success response:
+### Success Response
 
-```json
+ 
 {
   "success": true,
   "message": "Login successful",
-  "token": "jwt-token",
+  "token": "JWT_TOKEN",
   "user": {
     "id": 1,
-    "full_name": "Chanda Banda",
-    "email": "chanda@example.com",
-    "phone_number": "0970000000",
-    "role": "borrower"
+    "student_number": null,
+    "full_name": null,
+    "university": null,
+    "email": null,
+    "phone_number": "260977123456",
+    "role": "borrower",
+    "is_verified": true
   }
 }
-```
+ 
 
-Common errors:
+### Error Responses
 
-| Status | Message |
-|---|---|
-| `400` | `Phone number and OTP required` |
-| `401` | `OTP validation failed` |
-| `403` | `Account disabled` |
-
-### Authenticated requests
-
-Send the JWT from `POST /api/login/otp` as a bearer token.
-
-```http
-Authorization: Bearer jwt-token
-```
-
-Protected examples:
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/me` | Returns the decoded authenticated user token payload |
-| `GET` | `/api/protected` | Confirms protected route access |
-
-## Admin user management
-
-Admin routes require a bearer token whose user has `role: "admin"`.
-
-### List users
-
-`GET /api/admin/users`
-
-Query parameters:
-
-| Name | Description |
-|---|---|
-| `search` | Optional search across `full_name`, `email`, `student_number`, and `phone_number` |
-| `role` | Optional role filter: `borrower`, `lender`, `rep`, `admin`, or `agent` |
-| `is_active` | Optional status filter: `0` or `1` |
-| `page` | Optional page number, defaults to `1` |
-| `limit` | Optional page size from `1` to `100`, defaults to `20` |
-
-### Get a user
-
-`GET /api/admin/users/{user_id}`
-
-Returns the full serialized user record, including status, verification, failed attempts, and timestamps.
-
-### Create a user
-
-`POST /api/admin/users`
-
-Request:
-
-```json
+ 
 {
-  "full_name": "Lender User",
-  "email": "lender@example.com",
-  "phone_number": "0970000001",
-  "password": "password123",
-  "role": "lender",
-  "is_active": 1,
-  "is_verified": 0
+  "success": false,
+  "message": "Invalid OTP"
 }
-```
+ 
 
-Success response:
+ 
+{
+  "success": false,
+  "message": "OTP expired"
+}
+ 
 
-```json
+---
+
+# User Routes
+
+## Get Current User
+
+Returns authenticated user information.
+
+### Endpoint
+
+ http
+GET /api/me
+ 
+
+### Full URL
+
+ http
+https://funsa.online/api/me
+ 
+
+### Headers
+
+ http
+Authorization: Bearer YOUR_JWT_TOKEN
+ 
+
+### Success Response
+
+ 
 {
   "success": true,
-  "message": "User created successfully",
-  "user_id": 2
+  "user": {
+    "id": 1,
+    "student_number": "20240001",
+    "full_name": "John Doe",
+    "university": "UNZA",
+    "email": "john@example.com",
+    "phone_number": "260977123456",
+    "role": "borrower",
+    "is_active": true,
+    "is_verified": true,
+    "failed_attempts": 0,
+    "last_login_at": "2026-05-19T10:00:00",
+    "created_at": "2026-05-01T10:00:00",
+    "updated_at": "2026-05-10T10:00:00"
+  }
 }
-```
+ 
 
-### Update a user
+---
 
-`PATCH /api/admin/users/{user_id}`
+# Product Routes
 
-Allowed fields: `student_number`, `full_name`, `university`, `email`, `phone_number`, `role`, `is_active`, `is_verified`.
+## Create Product
 
-### Update user status
+Creates a new marketplace product.
 
-`PATCH /api/admin/users/{user_id}/status`
+### Endpoint
 
-Request:
+ http
+POST /api/products
+ 
 
-```json
+### Full URL
+
+ http
+https://funsa.online/api/products
+ 
+
+### Headers
+
+ http
+Authorization: Bearer YOUR_JWT_TOKEN
+ 
+
+### Request Body
+
+ 
 {
-  "is_active": 0
+  "title": "MacBook Pro",
+  "description": "M2 MacBook Pro 16GB RAM",
+  "price": 25000,
+  "category": "Electronics",
+  "image_url": "https://example.com/image.jpg"
 }
-```
+ 
 
-### Reset user password
+### Success Response
 
-`PATCH /api/admin/users/{user_id}/reset-password`
-
-Request:
-
-```json
-{
-  "password": "newpassword123"
-}
-```
-
-Common admin errors:
-
-| Status | Message |
-|---|---|
-| `400` | `Invalid role. Must be one of: borrower, lender, rep, admin, agent` |
-| `400` | `Password must be at least 8 characters` |
-| `401` | `Token missing` |
-| `403` | `Admin access required` |
-| `404` | `User not found` |
-| `409` | `Email already exists` |
-| `409` | `Phone number already exists` |
-| `409` | `Student number already exists` |
-
-## Admin university management
-
-The list route is public. Get, create, update, and delete routes require a bearer token whose user has `role: "admin"`.
-
-### List universities
-
-`GET /api/admin/universities`
-
-This route does not require authentication.
-
-Query parameters:
-
-| Name | Description |
-|---|---|
-| `search` | Optional search across `name`, `code`, and `city` |
-| `is_active` | Optional status filter: `0` or `1` |
-| `page` | Optional page number, defaults to `1` |
-| `limit` | Optional page size from `1` to `100`, defaults to `20` |
-
-### Get a university
-
-`GET /api/admin/universities/{university_id}`
-
-### Create a university
-
-`POST /api/admin/universities`
-
-Request:
-
-```json
-{
-  "name": "University of Zambia",
-  "code": "UNZA",
-  "city": "Lusaka",
-  "is_active": 1
-}
-```
-
-Success response:
-
-```json
+ 
 {
   "success": true,
-  "message": "University created successfully",
-  "university_id": 1
+  "message": "Product created successfully",
+  "product_id": 1
 }
-```
+ 
 
-### Update a university
+---
 
-`PATCH /api/admin/universities/{university_id}`
+## Get Products
 
-Allowed fields: `name`, `code`, `city`, `is_active`.
+Returns paginated available products.
 
-### Delete a university
+### Endpoint
 
-`DELETE /api/admin/universities/{university_id}`
+ http
+GET /api/products
+ 
 
-Common university errors:
+### Full URL
 
-| Status | Message |
-|---|---|
-| `400` | `name is required` |
-| `400` | `No valid fields provided` |
-| `401` | `Token missing` |
-| `403` | `Admin access required` |
-| `404` | `University not found` |
-| `409` | `University name already exists` |
-| `409` | `University code already exists` |
+ http
+https://funsa.online/api/products
+ 
 
-## Zamtel SMS configuration
+### Headers
 
-Set these variables in `backend/.env`:
+ http
+Authorization: Bearer YOUR_JWT_TOKEN
+ 
 
-```env
-LOGIN_OTP_EXPIRES_SECONDS=300
-ZAMTEL_API_KEY=your-zamtel-api-key
-ZAMTEL_SENDER_ID=your-zamtel-sender-id
-ZAMTEL_BASE_URL=https://bulksms.zamtel.co.zm/api/v2.1/action/send/
-```
+### Query Parameters
 
-The OTP sender implements the Bulk SMS third-party interface v2.1.1. It sends a `POST` request using this official path shape:
+| Parameter | Type    | Description                    |
+| --------- | ------- | ------------------------------ |
+| search    | string  | Search by title or description |
+| category  | string  | Filter by category             |
+| page      | integer | Pagination page                |
+| limit     | integer | Results per page               |
 
-```text
-https://bulksms.zamtel.co.zm/api/v2.1/action/send/api_key/:api_key/contacts/:contacts/senderId/:sender_id/message/:message
-```
+### Example
 
-Phone numbers are normalized to Zamtel's `260...` contact format before sending. For example, `0970000000`, `+260970000000`, and `260970000000` are sent as `260970000000`.
+ http
+GET /api/products?search=laptop&category=Electronics&page=1&limit=10
+ 
+
+### Success Response
+
+ 
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "title": "MacBook Pro",
+      "description": "M2 MacBook Pro",
+      "price": 25000,
+      "category": "Electronics",
+      "image_url": "https://example.com/image.jpg",
+      "owner_id": 1,
+      "is_available": true,
+      "created_at": "2026-05-19T10:00:00",
+      "updated_at": "2026-05-19T10:00:00"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 1,
+    "total_pages": 1
+  }
+}
+ 
+
+---
+
+## Get Product By ID
+
+### Endpoint
+
+ http
+GET /api/products/{product_id}
+ 
+
+### Full URL
+
+ http
+https://funsa.online/api/products/1
+ 
+
+### Headers
+
+ http
+Authorization: Bearer YOUR_JWT_TOKEN
+ 
+
+### Success Response
+
+ 
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "title": "MacBook Pro",
+    "description": "M2 MacBook Pro",
+    "price": 25000,
+    "category": "Electronics",
+    "image_url": "https://example.com/image.jpg",
+    "owner_id": 1,
+    "is_available": true,
+    "created_at": "2026-05-19T10:00:00",
+    "updated_at": "2026-05-19T10:00:00"
+  }
+}
+ 
+
+---
+
+## Update Product
+
+Only the product owner can update the product.
+
+### Endpoint
+
+ http
+PATCH /api/products/{product_id}
+ 
+
+### Full URL
+
+ http
+https://funsa.online/api/products/1
+ 
+
+### Headers
+
+ http
+Authorization: Bearer YOUR_JWT_TOKEN
+ 
+
+### Request Body
+
+ 
+{
+  "price": 23000,
+  "is_available": true
+}
+ 
+
+### Success Response
+
+ 
+{
+  "success": true,
+  "message": "Product updated successfully"
+}
+ 
+
+---
+
+## Delete Product
+
+Only the product owner can delete the product.
+
+### Endpoint
+
+ http
+DELETE /api/products/{product_id}
+ 
+
+### Full URL
+
+ http
+https://funsa.online/api/products/1
+ 
+
+### Headers
+
+ http
+Authorization: Bearer YOUR_JWT_TOKEN
+ 
+
+### Success Response
+
+ 
+{
+  "success": true,
+  "message": "Product deleted successfully"
+}
+ 
+
+---
+
+# Loan Listing Routes
+
+## Create Loan Listing
+
+Creates a new loan request/listing.
+
+### Endpoint
+
+ http
+POST /api/loan-listings
+ 
+
+### Full URL
+
+ http
+https://funsa.online/api/loan-listings
+ 
+
+### Headers
+
+ http
+Authorization: Bearer YOUR_JWT_TOKEN
+ 
+
+### Request Body
+
+ 
+{
+  "amount": 5000,
+  "interest_rate": 15,
+  "duration_months": 6,
+  "purpose": "School fees"
+}
+ 
+
+### Success Response
+
+ 
+{
+  "success": true,
+  "message": "Loan listing created successfully",
+  "loan_listing_id": 1
+}
+ 
+
+---
+
+## Get Loan Listings
+
+Returns paginated loan listings.
+
+### Endpoint
+
+ http
+GET /api/loan-listings
+ 
+
+### Full URL
+
+ http
+https://funsa.online/api/loan-listings
+ 
+
+### Headers
+
+ http
+Authorization: Bearer YOUR_JWT_TOKEN
+ 
+
+### Query Parameters
+
+| Parameter | Type    | Description           |
+| --------- | ------- | --------------------- |
+| status    | string  | Filter by loan status |
+| page      | integer | Pagination page       |
+| limit     | integer | Results per page      |
+
+### Example
+
+ http
+GET /api/loan-listings?status=OPEN&page=1&limit=10
+ 
+
+### Success Response
+
+ 
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "borrower_id": 1,
+      "amount": 5000,
+      "interest_rate": 15,
+      "duration_months": 6,
+      "purpose": "School fees",
+      "status": "OPEN",
+      "created_at": "2026-05-19T10:00:00",
+      "updated_at": "2026-05-19T10:00:00"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 1,
+    "total_pages": 1
+  }
+}
+ 
+
+---
+
+## Get Loan Listing By ID
+
+### Endpoint
+
+ http
+GET /api/loan-listings/{loan_id}
+ 
+
+### Full URL
+
+ http
+https://funsa.online/api/loan-listings/1
+ 
+
+### Headers
+
+ http
+Authorization: Bearer YOUR_JWT_TOKEN
+ 
+
+### Success Response
+
+ 
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "borrower_id": 1,
+    "amount": 5000,
+    "interest_rate": 15,
+    "duration_months": 6,
+    "purpose": "School fees",
+    "status": "OPEN",
+    "created_at": "2026-05-19T10:00:00",
+    "updated_at": "2026-05-19T10:00:00"
+  }
+}
+ 
+
+---
+
+## Update Loan Listing
+
+Only the borrower who created the listing can update it.
+
+### Endpoint
+
+ http
+PATCH /api/loan-listings/{loan_id}
+ 
+
+### Full URL
+
+ http
+https://funsa.online/api/loan-listings/1
+ 
+
+### Headers
+
+ http
+Authorization: Bearer YOUR_JWT_TOKEN
+ 
+
+### Request Body
+
+ 
+{
+  "amount": 6000,
+  "interest_rate": 12,
+  "status": "OPEN"
+}
+ 
+
+### Success Response
+
+ 
+{
+  "success": true,
+  "message": "Loan listing updated successfully"
+}
+ 
+
+---
+
+## Delete Loan Listing
+
+Only the borrower who created the listing can delete it.
+
+### Endpoint
+
+ http
+DELETE /api/loan-listings/{loan_id}
+ 
+
+### Full URL
+
+ http
+https://funsa.online/api/loan-listings/1
+ 
+
+### Headers
+
+ http
+Authorization: Bearer YOUR_JWT_TOKEN
+ 
+
+### Success Response
+
+ 
+{
+  "success": true,
+  "message": "Loan listing deleted successfully"
+}
+ 
+
+---
+
+# Health Check
+
+## API Status
+
+### Endpoint
+
+ http
+GET /
+ 
+
+### Full URL
+
+ http
+https://funsa.online/
+ 
+
+### Success Response
+
+ 
+{
+  "success": true,
+  "message": "JWT API running"
+}
+ 
+
+---
+
+# Common Error Responses
+
+## Unauthorized
+
+ 
+{
+  "success": false,
+  "message": "Authorization token missing"
+}
+ 
+
+ 
+{
+  "success": false,
+  "message": "Invalid token"
+}
+ 
+
+ 
+{
+  "success": false,
+  "message": "Token expired"
+}
+ 
+
+---
+
+## Forbidden
+
+ 
+{
+  "success": false,
+  "message": "Unauthorized"
+}
+ 
+
+ 
+{
+  "success": false,
+  "message": "Account disabled"
+}
+ 
+
+---
+
+## Validation Errors
+
+ 
+{
+  "success": false,
+  "message": "No valid fields provided"
+}
+ 
+
+ 
+{
+  "success": false,
+  "message": "Product not found"
+}
+ 
+
+ 
+{
+  "success": false,
+  "message": "Loan listing not found"
+}
+ 
